@@ -1,0 +1,32 @@
+const PROVIDERS={openai:{label:'OpenAI',type:'openai',baseUrl:'https://api.openai.com/v1'},anthropic:{label:'Anthropic / Claude',type:'anthropic',baseUrl:'https://api.anthropic.com'},mistral:{label:'Mistral',type:'openai-compatible',baseUrl:'https://api.mistral.ai/v1'},ollama:{label:'Ollama',type:'ollama',baseUrl:'http://127.0.0.1:11434'},'openai-compatible':{label:'OpenAI-Compatible',type:'openai-compatible',baseUrl:''},custom:{label:'Custom',type:'openai-compatible',baseUrl:''}};
+
+export class AIProviderManager {
+  constructor(db,events,audit,logger=console){this.db=db;this.events=events;this.audit=audit;this.logger=logger;}
+  catalog(){return Object.entries(PROVIDERS).map(([id,v])=>({id,...v}));}
+  internalConfig(guildId){return this.db.getAIProvider(guildId)||{provider:process.env.AI_PROVIDER||'none',model:process.env.AI_MODEL||'',baseUrl:process.env.AI_BASE_URL||'',apiKey:process.env.AI_API_KEY||null};}
+  config(guildId){const c=this.internalConfig(guildId);return {...c,apiKey:undefined,apiKeyConfigured:Boolean(c.apiKey),configured:Boolean(c.model),fallbacks:this.db.listAIProviderSlots(guildId).map(x=>({...x,secret:undefined,apiKeyConfigured:Boolean(this.db.getAIProviderSlotSecret(guildId,x.slot_id))}))};}
+  save(guildId,cfg,actorId=null){const provider=String(cfg.provider||'').toLowerCase();if(!PROVIDERS[provider])throw new Error('Unbekannter AI-Provider.');const old=this.internalConfig(guildId);const value={provider,model:String(cfg.model||''),baseUrl:String(cfg.baseUrl||PROVIDERS[provider].baseUrl||''),apiKey:cfg.apiKey===undefined?old.apiKey:String(cfg.apiKey||'')};this.db.setAIProvider(guildId,value);this.audit?.recordCore(guildId,'ai.provider.changed',actorId,{provider,model:value.model,baseUrl:value.baseUrl,apiKeyConfigured:Boolean(value.apiKey)});this.events?.publish('ai.provider.changed',{provider,model:value.model,baseUrl:value.baseUrl,configured:Boolean(value.model)},{source:'ai',communityId:guildId});return this.config(guildId);}
+  saveFallback(guildId,cfg,actorId=null){const provider=String(cfg.provider||'').toLowerCase();if(!PROVIDERS[provider])throw new Error('Unbekannter AI-Provider.');const slot=this.db.saveAIProviderSlot(guildId,cfg);this.audit?.recordCore(guildId,'ai.provider.fallback.changed',actorId,{slotId:slot.slot_id,provider:slot.provider,model:slot.model,priority:slot.priority,enabled:slot.enabled});this.events?.publish('ai.provider.fallback.changed',{slotId:slot.slot_id,provider:slot.provider,model:slot.model,priority:slot.priority,enabled:slot.enabled},{source:'ai',communityId:guildId});return {...slot,apiKeyConfigured:Boolean(this.db.getAIProviderSlotSecret(guildId,slot.slot_id))};}
+  deleteFallback(guildId,slotId,actorId=null){this.db.deleteAIProviderSlot(guildId,slotId);this.audit?.recordCore(guildId,'ai.provider.fallback.deleted',actorId,{slotId:String(slotId)});this.events?.publish('ai.provider.fallback.deleted',{slotId:String(slotId)},{source:'ai',communityId:guildId});return this.config(guildId);}
+  async models(guildId){const c=this.internalConfig(guildId);return this.#models(c);}
+  async #models(c){if(c.provider==='none')return[];if(c.provider==='ollama'){const r=await fetch(c.baseUrl.replace(/\/$/,'')+'/api/tags');if(!r.ok)throw new Error(`Ollama HTTP ${r.status}`);const d=await r.json();return(d.models||[]).map(x=>x.name).filter(Boolean);}if(c.provider==='anthropic')return[];const r=await fetch(c.baseUrl.replace(/\/$/,'')+'/models',{headers:c.apiKey?{Authorization:`Bearer ${c.apiKey}`}:{}});if(!r.ok)throw new Error(`AI HTTP ${r.status}`);const d=await r.json();return(d.data||[]).map(x=>x.id).filter(Boolean);}
+  async chatWithMeta(guildId,messages,opts={}){
+    const candidates=[]; const primary=this.internalConfig(guildId); if(primary.model)candidates.push({...primary,slotId:'primary'});
+    for(const slot of this.db.listAIProviderSlots(guildId).filter(x=>x.enabled&&x.model)) candidates.push({...slot,baseUrl:slot.base_url,apiKey:this.db.getAIProviderSlotSecret(guildId,slot.slot_id),slotId:slot.slot_id});
+    if(!candidates.length)throw new Error('Kein KI-Modell konfiguriert.');
+    const failures=[];
+    for(let i=0;i<candidates.length;i++){
+      const c=candidates[i];
+      try { const content=await this.#chat(c,messages,opts); const fallbackUsed=i>0; if(fallbackUsed)this.events?.publish('ai.provider.fallback.used',{from:candidates[0].slotId,to:c.slotId,provider:c.provider,model:c.model,failures},{source:'ai',communityId:guildId}); return {content,provider:c.provider,model:c.model,slotId:c.slotId,fallbackUsed}; }
+      catch(error){ failures.push({slotId:c.slotId,provider:c.provider,error:String(error?.message||error).slice(0,500)}); this.logger.warn?.(`AI Provider ${c.slotId} fehlgeschlagen:`,error?.message||error); this.events?.publish('ai.provider.failed',{slotId:c.slotId,provider:c.provider,model:c.model,error:String(error?.message||error).slice(0,500),attempt:i+1},{source:'ai',communityId:guildId}); }
+    }
+    throw new Error(`Alle konfigurierten AI-Provider sind fehlgeschlagen: ${failures.map(f=>f.slotId).join(', ')}`);
+  }
+  async chat(guildId,messages,opts={}){return (await this.chatWithMeta(guildId,messages,opts)).content;}
+  async #chat(c,messages,opts={}){
+    const headers={'Content-Type':'application/json'};if(c.apiKey)headers.Authorization=`Bearer ${c.apiKey}`;let data;
+    if(c.provider==='ollama'){const r=await fetch(c.baseUrl.replace(/\/$/,'')+'/api/chat',{method:'POST',headers,body:JSON.stringify({model:c.model,messages,stream:false})});if(!r.ok)throw new Error(`Ollama HTTP ${r.status}`);data=await r.json();return data.message?.content||'';}
+    if(c.provider==='anthropic'){headers['x-api-key']=c.apiKey||'';headers['anthropic-version']='2023-06-01';delete headers.Authorization;const r=await fetch(c.baseUrl.replace(/\/$/,'')+'/v1/messages',{method:'POST',headers,body:JSON.stringify({model:c.model,max_tokens:opts.maxTokens||1024,messages:messages.filter(m=>m.role!=='system'),system:messages.find(m=>m.role==='system')?.content})});if(!r.ok)throw new Error(`Anthropic HTTP ${r.status}`);data=await r.json();return data.content?.map(x=>x.text||'').join('')||'';}
+    const base=c.baseUrl.replace(/\/$/,''); const endpoint=base.endsWith('/v1')?`${base}/chat/completions`:`${base}/v1/chat/completions`;const r=await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({model:c.model,messages,temperature:0.2})});if(!r.ok)throw new Error(`AI HTTP ${r.status}`);data=await r.json();return data.choices?.[0]?.message?.content||'';
+  }
+}

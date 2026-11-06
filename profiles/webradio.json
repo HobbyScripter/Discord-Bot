@@ -1,0 +1,7 @@
+{
+  "id": "webradio",
+  "name": "WebRadio",
+  "botName": "WebRadio Community",
+  "description": "Offizielles WebRadio Community Profil",
+  "modules": ["welcome", "moderation", "reactionRoles", "onboarding", "releases", "analytics", "ai"]
+}

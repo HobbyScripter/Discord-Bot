@@ -1,0 +1,23 @@
+{
+  "name": "webradio-community-core",
+  "version": "6.0.2",
+  "private": true,
+  "description": "Modular multi-community Discord Community Core with stable API v1, live dashboard, identity, RBAC, security operations, support intelligence, automation, resilient AI, production hardening and release-safe community state.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "setup": "node src/index.js",
+    "dry-run": "node src/index.js --dry-run",
+    "bot": "node src/bot.js",
+    "dashboard": "node src/bot.js",
+    "start": "node src/bot.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "discord.js": "14.27.0",
+    "dotenv": "^17.2.2"
+  }
+}

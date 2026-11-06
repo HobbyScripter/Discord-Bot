@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { CommunityDatabase } from '../src/core/database.js';
+import { CoreEventBus } from '../src/core/event-bus.js';
+import { AuditManager } from '../src/core/audit.js';
+import { IncidentManager } from '../src/core/incidents.js';
+
+test('incident lifecycle persists timeline, assignment and resolution', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'community-core-incident-'));
+  const db = new CommunityDatabase(path.join(dir, 'test.sqlite'));
+  const guild = { id: 'g1', name: 'Test Community' };
+  db.upsertCommunity(guild);
+  const events = new CoreEventBus();
+  const audit = new AuditManager(db, events);
+  const incidents = new IncidentManager(db, events, audit);
+  const created = incidents.create('g1', { title: 'Raid', severity: 'critical', type: 'security', summary: 'Join burst' }, 'staff1');
+  const assigned = incidents.assign('g1', created.id, 'staff2', 'staff1');
+  assert.equal(assigned.status, 'investigating');
+  assert.equal(assigned.assigned_to, 'staff2');
+  incidents.addNote('g1', created.id, 'staff2', 'Mitigation started.');
+  const resolved = incidents.resolve('g1', created.id, 'staff2', 'Raid contained.');
+  assert.equal(resolved.status, 'resolved');
+  assert.equal(resolved.resolved_by, 'staff2');
+  const timeline = incidents.timeline('g1', created.id);
+  assert.ok(timeline.length >= 5);
+  assert.ok(timeline.some(x => x.kind === 'assignment'));
+  assert.ok(timeline.some(x => x.kind === 'resolution'));
+  assert.ok(db.listAudit('g1', 50).some(x => x.type === 'incident.resolved'));
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});
