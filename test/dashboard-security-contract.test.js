@@ -24,3 +24,16 @@ test('generic dashboard actions use an explicit allowlist', () => {
   for (const action of ['sync', 'reactionRoles', 'setup', 'onboarding']) assert.match(snippet, new RegExp(`['\\"]${action}['\\"]`));
   assert.match(snippet, /Unknown|Unbekannte Aktion/);
 });
+
+
+test('dashboard host is configurable with a loopback-only default', () => {
+  assert.match(source, /host = process\\.env\\.DASHBOARD_HOST \\|\\| '127\\.0\\.0\\.1'/);
+  assert.match(source, /server\\.listen\\(boundPort, bindHost,/);
+  assert.match(source, /DASHBOARD_HOST: e\\.DASHBOARD_HOST \\|\\| '127\\.0\\.0\\.1'/);
+  assert.match(source, /'DASHBOARD_HOST'/);
+});
+
+test('LAN binding without a password emits an explicit firewall warning', () => {
+  assert.match(source, /if \\(wildcard && !authEnabled\\(\\)\\)/);
+  assert.match(source, /Firewall auf das private LAN begrenzen/);
+});
