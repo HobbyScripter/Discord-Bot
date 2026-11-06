@@ -26,14 +26,15 @@ test('generic dashboard actions use an explicit allowlist', () => {
 });
 
 
+
 test('dashboard host is configurable with a loopback-only default', () => {
-  assert.match(source, /host = process\\.env\\.DASHBOARD_HOST \\|\\| '127\\.0\\.0\\.1'/);
-  assert.match(source, /server\\.listen\\(boundPort, bindHost,/);
-  assert.match(source, /DASHBOARD_HOST: e\\.DASHBOARD_HOST \\|\\| '127\\.0\\.0\\.1'/);
-  assert.match(source, /'DASHBOARD_HOST'/);
+  assert.ok(source.includes("host = process.env.DASHBOARD_HOST || '127.0.0.1'"));
+  assert.ok(source.includes('server.listen(boundPort, bindHost,'));
+  assert.ok(source.includes("DASHBOARD_HOST: e.DASHBOARD_HOST || '127.0.0.1'"));
+  assert.ok(source.includes("'DASHBOARD_HOST'"));
 });
 
 test('LAN binding without a password emits an explicit firewall warning', () => {
-  assert.match(source, /if \\(wildcard && !authEnabled\\(\\)\\)/);
-  assert.match(source, /Firewall auf das private LAN begrenzen/);
+  assert.ok(source.includes('if (wildcard && !authEnabled())'));
+  assert.ok(source.includes('Firewall auf das private LAN begrenzen'));
 });
