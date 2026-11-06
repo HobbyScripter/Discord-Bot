@@ -147,7 +147,9 @@ SQLite replaces MySQL and requires no database server. Community data, settings,
 The project includes a provider-neutral AI adapter. Providers can be implemented under `src/ai/providers/` without changing the Community Core. Destructive Discord actions should always go through explicit confirmation gates.
 
 ## Security
-The dashboard binds to `127.0.0.1` by default. Set `DASHBOARD_PASSWORD` for authentication. Do not expose it publicly without proper authentication/reverse-proxy controls.
+The dashboard binds to `127.0.0.1` by default and does not require a password. Set `DASHBOARD_PASSWORD` only if you want dashboard login protection.
+
+For access from other devices on your private LAN, set `DASHBOARD_HOST=0.0.0.0` and allow TCP port `5177` only from your trusted local subnet in the host firewall. Do not create a router port-forward. Binding to `0.0.0.0` without a password makes the full dashboard control plane available to devices that can reach that port, so the firewall restriction is essential. You can instead set `DASHBOARD_HOST` to a specific LAN IP address.
 
 ## Control Center 3.1
 
