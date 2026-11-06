@@ -111,7 +111,7 @@ function setEnvValue(text, key, value) {
 }
 async function saveSettings(values) {
   let env = await readEnvFile();
-  const allowed = ['GITHUB_OWNER', 'GITHUB_REPO', 'GITHUB_POLL_INTERVAL_MS', 'WELCOME_CHANNEL_NAME', 'WELCOME_MENTION', 'WELCOME_INCLUDE_BOTS', 'WELCOME_MESSAGES_JSON', 'DASHBOARD_PORT', 'AI_PROVIDER', 'AI_BASE_URL', 'AI_MODEL', 'AI_API_KEY'];
+  const allowed = ['GITHUB_OWNER', 'GITHUB_REPO', 'GITHUB_POLL_INTERVAL_MS', 'WELCOME_CHANNEL_NAME', 'WELCOME_MENTION', 'WELCOME_INCLUDE_BOTS', 'WELCOME_MESSAGES_JSON', 'DASHBOARD_HOST', 'DASHBOARD_PORT', 'AI_PROVIDER', 'AI_BASE_URL', 'AI_MODEL', 'AI_API_KEY'];
   for (const key of allowed) if (values[key] !== undefined) env = setEnvValue(env, key, typeof values[key] === 'object' ? JSON.stringify(values[key]) : values[key]);
   await fs.writeFile('.env', env, 'utf8');
 }
@@ -124,7 +124,7 @@ function settings() {
     GITHUB_OWNER: e.GITHUB_OWNER || 'YourEliteSystems', GITHUB_REPO: e.GITHUB_REPO || 'WebRadio',
     GITHUB_POLL_INTERVAL_MS: e.GITHUB_POLL_INTERVAL_MS || '300000', WELCOME_CHANNEL_NAME: e.WELCOME_CHANNEL_NAME || '📜・welcome',
     WELCOME_MENTION: e.WELCOME_MENTION !== 'false', WELCOME_INCLUDE_BOTS: e.WELCOME_INCLUDE_BOTS === 'true',
-    WELCOME_MESSAGES: templates, DASHBOARD_PORT: e.DASHBOARD_PORT || '5177',
+    WELCOME_MESSAGES: templates, DASHBOARD_HOST: e.DASHBOARD_HOST || '127.0.0.1', DASHBOARD_PORT: e.DASHBOARD_PORT || '5177',
   };
 }
 export function setDashboardState(patch) {
@@ -168,7 +168,7 @@ function sessionFrom(req) { const m = /(?:^|; )wrb_session=([^;]+)/.exec(req.hea
 function authorized(req) { return !authEnabled() || sessions.has(sessionFrom(req)); }
 function authPage() { return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebRadio Control Center Login</title><style>body{font-family:system-ui;background:#0b1020;color:#fff;display:grid;place-items:center;height:100vh;margin:0}.box{background:#121a2b;border:1px solid #293650;padding:25px;border-radius:14px;width:min(360px,90%)}input,button{width:100%;padding:11px;margin-top:10px;border-radius:8px;border:1px solid #293650;background:#0c1425;color:#fff}button{background:#5865f2;border:0;cursor:pointer}</style><div class="box"><h2>📻 WebRadio Control Center</h2><p>Dashboard-Passwort</p><form method="post" action="/login"><input type="password" name="password" autofocus><button>Einloggen</button></form></div>`; }
 
-export function startDashboard({ client, guild: initialGuild, database = null, port = Number(process.env.DASHBOARD_PORT || 5177), actions = {}, eventBus = null } = {}) {
+export function startDashboard({ client, guild: initialGuild, database = null, host = process.env.DASHBOARD_HOST || '127.0.0.1', port = Number(process.env.DASHBOARD_PORT || 5177), actions = {}, eventBus = null } = {}) {
   if (eventBus) configureDashboardEvents(eventBus);
   let guild = initialGuild;
   const server = http.createServer(async (req, res) => {
@@ -442,8 +442,14 @@ export function startDashboard({ client, guild: initialGuild, database = null, p
       return json(res, 404, { error: 'Not found' });
     } catch (error) { dashboardLogger.error('Dashboard-Fehler:', error); return json(res, 500, { ok: false, error: error?.message || String(error) }); }
   });
+  const bindHost = String(host || '127.0.0.1').trim() || '127.0.0.1';
   let boundPort = port;
-  const bind = () => server.listen(boundPort, '127.0.0.1', () => { botState.dashboardPort=boundPort; dashboardLogger.info(`✓ Dashboard: http://127.0.0.1:${boundPort}`); });
+  const bind = () => server.listen(boundPort, bindHost, () => {
+    botState.dashboardPort = boundPort;
+    const wildcard = bindHost === '0.0.0.0' || bindHost === '::';
+    dashboardLogger.info(`✓ Dashboard lauscht auf ${bindHost}:${boundPort}${wildcard ? ' (alle Netzwerk-Interfaces)' : ''}`);
+    if (wildcard && !authEnabled()) dashboardLogger.warn('⚠ Dashboard ist ohne Passwort im Netzwerk erreichbar. Zugriff unbedingt per Firewall auf das private LAN begrenzen; keine Router-Portfreigabe einrichten.');
+  });
   server.on('error', (error) => {
     if (error.code === 'EADDRINUSE' && boundPort < port + 20) { dashboardLogger.warn(`⚠ Dashboard-Port ${boundPort} ist belegt – versuche ${boundPort + 1}.`); boundPort += 1; setTimeout(bind, 50); return; }
     dashboardLogger.error('Dashboard-Serverfehler:', error);
